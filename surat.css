@@ -1,0 +1,102 @@
+/* ===== Tata letak surat — meniru surat DPD PERSAGI Sulsel (kertas F4 8,5 x 13 inci) ===== */
+@font-face { font-family: 'Caladea'; src: url('assets/fonts/caladea-latin-400-normal.woff2') format('woff2'); font-weight: 400; font-style: normal; }
+@font-face { font-family: 'Caladea'; src: url('assets/fonts/caladea-latin-700-normal.woff2') format('woff2'); font-weight: 700; font-style: normal; }
+@font-face { font-family: 'Caladea'; src: url('assets/fonts/caladea-latin-400-italic.woff2') format('woff2'); font-weight: 400; font-style: italic; }
+@font-face { font-family: 'Caladea'; src: url('assets/fonts/caladea-latin-700-italic.woff2') format('woff2'); font-weight: 700; font-style: italic; }
+@font-face { font-family: 'Arimo'; src: url('assets/fonts/arimo-latin-400-normal.woff2') format('woff2'); font-weight: 400; font-style: normal; }
+@font-face { font-family: 'Arimo'; src: url('assets/fonts/arimo-latin-700-normal.woff2') format('woff2'); font-weight: 700; font-style: normal; }
+@font-face { font-family: 'Arimo'; src: url('assets/fonts/arimo-latin-400-italic.woff2') format('woff2'); font-weight: 400; font-style: italic; }
+@font-face { font-family: 'Arimo'; src: url('assets/fonts/arimo-latin-700-italic.woff2') format('woff2'); font-weight: 700; font-style: italic; }
+
+.pg {
+  width: 8.5in; height: 13in; position: relative; overflow: hidden;
+  background: #fff; color: #000; box-sizing: border-box;
+  -webkit-font-smoothing: antialiased; font-kerning: normal;
+}
+.pg * { box-sizing: border-box; }
+.pg .kop { position: absolute; left: .75in; top: .35in; width: 7.17in; }
+.pg .footer { position: absolute; left: 0; bottom: 0; width: 8.5in; }
+.pg .hal { position: absolute; left: 56.7pt; right: 57pt; top: 131.5pt; bottom: .9in; }
+.pg.tanpa-kop .hal { top: .8in; }
+.pg.terpotong .hal { outline: 2px dashed #e11d48; outline-offset: 2px; }
+
+/* --- Surat biasa --- */
+.sb { font-family: var(--f-isi); font-size: var(--s-isi); line-height: 1.17; }
+.sb .hrow { display: grid; grid-template-columns: 60pt 8pt 1fr; }
+.sb .hrow .v.ph { font-weight: 700; text-decoration: underline; }
+.sb .kepada { margin: 14pt 0 0 72pt; }
+.sb .kepada .tuj { font-weight: 700; }
+.sb .kepada .tuj .ln { display: grid; grid-template-columns: 14pt 1fr; }
+.sb .kepada .tempat { margin-left: 36pt; }
+.sb .salam { margin: 28pt 0 0 72pt; }
+.sb .isi, .lp .isi { margin-left: 72pt; line-height: 1.35; text-align: justify; }
+
+.isi p { margin: 0; min-height: 1em; }
+.isi p.ind { text-indent: 34pt; }
+.isi p.ctr { text-align: center; text-indent: 0; }
+.isi ol, .isi ul { margin: 0; padding-left: 22.5pt; list-style: none; }
+.isi ol { counter-reset: nomor; }
+.isi li { position: relative; }
+.isi ol > li { counter-increment: nomor; }
+.isi ol > li::before { content: counter(nomor) "."; position: absolute; left: -22.5pt; }
+.isi ul > li::before { content: "\2022"; position: absolute; left: -18pt; }
+.isi li ol, .isi li ul { padding-left: 18pt; }
+.isi li ol > li::before { left: -18pt; content: counter(nomor, lower-alpha) "."; }
+.isi table { border-collapse: collapse; margin: 0; }
+.isi table.detail td { padding: 0 4pt 0 0; vertical-align: top; line-height: 1.17; }
+.isi table.detail.lega td { padding: 3.5pt 4pt 3.5pt 0; }
+.isi table.detail td:first-child { width: 84pt; white-space: nowrap; }
+.isi table.kotak { width: 100%; }
+.isi table.kotak td, .isi table.kotak th { border: .75pt solid #000; padding: 2pt 4pt; vertical-align: top; }
+.isi table.kotak th { font-weight: 700; text-align: center; }
+
+/* --- Blok tanda tangan --- */
+.ttd { position: relative; margin: 30pt 0 0 288pt; font-family: var(--f-ttd); font-size: var(--s-ttd); line-height: 1.15; }
+.ttd .sp { height: 1.15em; }
+.ttd .ruang { height: 4.6em; }
+.ttd .nm { font-weight: 700; text-decoration: underline; position: relative; z-index: 3; }
+.ttd .kta { position: relative; z-index: 3; }
+.ttd .baris { position: relative; z-index: 3; }
+.ttd img.stempel { position: absolute; z-index: 1; pointer-events: none; }
+.ttd img.ttdimg { position: absolute; z-index: 2; pointer-events: none; }
+
+/* --- Surat tugas --- */
+.st { font-family: var(--f-tugas); font-size: var(--s-tugas); line-height: 1.15; }
+.st .judul { text-align: center; font-weight: 700; text-decoration: underline; margin-top: 2pt; }
+.st .nomor { text-align: center; }
+.st .pembuka { margin-top: 24pt; line-height: 20.7pt; text-align: justify; }
+.st .petugas { margin-top: 23.5pt; line-height: 15.8pt; }
+.st .petugas .blok { display: grid; grid-template-columns: 36pt 1fr; }
+.st .petugas .blok + .blok { margin-top: 8pt; }
+.st .petugas .blok .no { text-align: left; padding-left: 14pt; }
+.st .petugas .bris { display: grid; grid-template-columns: 63pt 10pt 1fr; }
+.st .petugas table.kotak { width: 100%; border-collapse: collapse; line-height: 1.25; }
+.st .petugas table.kotak td, .st .petugas table.kotak th { border: .75pt solid #000; padding: 2pt 4pt; vertical-align: top; }
+.st .petugas table.kotak th { text-align: center; }
+.st .untuk { margin-top: 18pt; display: grid; grid-template-columns: 49.6pt 12pt 1fr; line-height: 20.7pt; }
+.st .untuk .it { display: grid; grid-template-columns: 14pt 1fr; }
+.st .penutup { margin-top: 20.7pt; line-height: 20.7pt; text-align: justify; }
+.st .ttd { margin-top: 38pt; }
+
+/* --- Halaman lampiran --- */
+.lp { font-family: var(--f-tugas); font-size: var(--s-tugas); line-height: 1.15; }
+.lp .kepala { margin-left: 250pt; }
+.lp .kepala .r { display: grid; grid-template-columns: 58pt 8pt 1fr; }
+.lp .jdl { text-align: center; font-weight: 700; margin: 18pt 0 10pt; }
+.lp table.kotak { width: 100%; border-collapse: collapse; line-height: 1.25; }
+.lp table.kotak td, .lp table.kotak th { border: .75pt solid #000; padding: 2pt 4pt; vertical-align: top; }
+.lp table.kotak th { text-align: center; }
+.lp .isi { margin-left: 0; font-family: var(--f-isi); font-size: var(--s-isi); }
+
+.nomor-draf { color: #9ca3af; }
+
+@media print {
+  @page { size: 8.5in 13in; margin: 0; }
+  html, body { margin: 0 !important; padding: 0 !important; background: #fff !important; }
+  body > *:not(#cetak-area) { display: none !important; }
+  #cetak-area { display: block !important; }
+  #cetak-area .pg { page-break-after: always; break-after: page; outline: none; }
+  #cetak-area .pg:last-child { page-break-after: auto; break-after: auto; }
+  .pg.terpotong .hal { outline: none; }
+}
+#cetak-area { display: none; }
