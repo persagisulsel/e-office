@@ -46,6 +46,22 @@
   const ketKta = k => { const t = String(k || '').trim(); if (!t || t === '-') return 'KTA kosong'; const n = t.replace(/\D/g, '').length; if (/\D/.test(t)) return 'KTA berisi selain angka'; return n + ' digit (seharusnya 17)'; };
   const pengurusById = id => S.pengurus.find(x => x.id === id);
   const aktif = v => !(v === false || String(v).toUpperCase() === 'FALSE');
+  const SUDAH_TTD = ['ditandatangani', 'terkirim', 'terbit'];
+  const STATUS = { draf: ['draf', 'Draf'], diajukan: ['biru', 'Menunggu TTD'], dikembalikan: ['peringatan', 'Dikembalikan'], ditandatangani: ['terbit', 'Ditandatangani'], terbit: ['terbit', 'Ditandatangani'], terkirim: ['kirim', 'Terkirim'], batal: ['batal', 'Batal'] };
+  const lencanaStatus = st => `<span class="lencana ${(STATUS[st] || ['', ''])[0]}">${esc((STATUS[st] || ['', st])[1])}</span>`;
+  const isKetua = () => !!(S.user && S.user.peran === 'ketua');
+  const sudahTtd = d => SUDAH_TTD.includes(d.status);
+  const bisaEdit = d => !d.status || d.status === 'draf' || d.status === 'dikembalikan' || (d.status === 'diajukan' && isKetua() && d.modeEdit);
+  const alamatPortal = () => location.origin + location.pathname;
+  function nomorWa(hp) { let n = String(hp || '').replace(/\D/g, ''); if (n.startsWith('0')) n = '62' + n.slice(1); else if (n.startsWith('8')) n = '62' + n; return n; }
+  const linkWa = (hp, teks) => `https://wa.me/${nomorWa(hp)}?text=${encodeURIComponent(teks)}`;
+  const akunKetua = () => (S.akun || []).filter(a => a.peran === 'ketua');
+  const akunSekretaris = () => (S.akun || []).filter(a => a.peran !== 'ketua');
+  /** Modal berisi tombol WA (dibuka lewat klik pengguna agar tidak diblokir peramban/HP). */
+  function modalWa(judul, pesan, tujuan, teks) {
+    const ada = tujuan.filter(a => nomorWa(a.hp).length >= 10);
+    return modal({ judul, isi: `<div style="line-height:1.6">${pesan}</div>${ada.length ? `<div class="deret" style="margin-top:14px">${ada.map(a => `<a class="btn wa" target="_blank" rel="noopener" href="${linkWa(a.hp, teks)}">💬 Kabari ${esc(a.nama)} via WA</a>`).join('')}</div>` : `<div class="peringatan-box" style="margin-top:12px">Nomor WA ${tujuan.length ? esc(tujuan.map(a => a.nama).join(', ')) : 'tujuan'} belum diisi. Atur di Pengaturan → Akun admin.</div>`}`, tombol: [{ label: 'Tutup', kelas: 'utama-b' }] });
+  }
   const fontStack = n => ({ 'Cambria': "Cambria, 'Caladea', Georgia, serif", 'Arial': "Arial, 'Arimo', Helvetica, sans-serif", 'Times New Roman': "'Times New Roman', Times, serif", 'Calibri': "Calibri, Carlito, 'Arimo', sans-serif", 'Bookman Old Style': "'Bookman Old Style', 'Caladea', serif" }[n] || n);
 
   /* ---------------- SSO ---------------- */
@@ -98,7 +114,7 @@
   }
   async function muatInit() {
     const r = await api('init');
-    S.user = r.user; S.p = r.pengaturan; S.penomoran = r.penomoran; S.pengurus = r.pengurus; S.gambar = r.gambar || {};
+    S.user = r.user; S.p = r.pengaturan; S.penomoran = r.penomoran; S.pengurus = r.pengurus; S.gambar = r.gambar || {}; S.akun = r.akun || [];
   }
 
   /* ---------------- Router ---------------- */
@@ -114,10 +130,11 @@
     hashSebelum = h;
     const [jalur, qs] = h.slice(1).split('?');
     const q = new URLSearchParams(qs || '');
+    if (jalur.startsWith('/v/')) return viewVerifikasi(jalur.slice(3));
     const sso = bacaSSO();
     if (jalur.startsWith('/login') || !sso) {
       if (sso && q.get('next')) return lanjutKe(q.get('next'));
-      return viewLogin(q.get('next'));
+      return viewLogin(q.get('next') || (sso || jalur === '/' || jalur.startsWith('/login') ? null : location.href));
     }
     if (!S.user) {
       try { await muatInit(); } catch (e) { if (e.message !== 'SESI_HABIS') { $('#app').innerHTML = `<div class="kosong">${esc(e.message)}<br><br><button class="btn" onclick="location.reload()">Coba lagi</button></div>`; } return; }
@@ -137,7 +154,14 @@
     location.hash = '#/';
   }
   function lanjutKe(next) {
-    try { const u = new URL(next, location.href); if (u.origin === location.origin) { location.href = u.href; return; } } catch (e) { }
+    try {
+      const u = new URL(next, location.href);
+      if (u.origin === location.origin) {
+        if (u.pathname === location.pathname) { if (location.hash === u.hash) route(); else location.hash = u.hash || '#/'; }
+        else location.href = u.href;
+        return;
+      }
+    } catch (e) { }
     location.hash = '#/';
   }
 
@@ -161,7 +185,8 @@
       const f = e.target;
       try {
         const r = await api('login', { username: f.u.value, password: f.p.value });
-        simpanSSO({ token: r.token, username: r.username, nama: r.nama, exp: r.exp, harusGanti: r.harusGanti });
+        simpanSSO({ token: r.token, username: r.username, nama: r.nama, peran: r.peran, exp: r.exp, harusGanti: r.harusGanti });
+        S.user = null;
         S.user = null;
         if (next && !r.harusGanti) return lanjutKe(next);
         if (location.hash === '#/') route(); else location.hash = '#/';
@@ -202,13 +227,13 @@
         <nav>
           ${item('#/', '🏠', 'Beranda', 'beranda')}
           <div class="sek">Aplikasi</div>
-          ${item('#/surat', '✉️', 'Generate Surat', 'surat')}
+          ${item('#/surat', '✉️', 'Generate Surat' + (S.hitung ? ` <span class="titik">${S.hitung}</span>` : ''), 'surat')}
           <a href="${sert ? esc(sert) : '#/pengaturan/integrasi'}" ${sert ? '' : 'title="Atur tautan di Pengaturan"'}><span class="ikon">🎓</span>${esc(S.p.namaAplikasiSertifikat || 'Kegiatan & Sertifikat')}${sert ? '' : ' <small style="opacity:.6">(atur)</small>'}</a>
           <div class="sek">Data</div>
           ${item('#/pengurus', '👥', 'Data Pengurus', 'pengurus')}
           ${item('#/pengaturan', '⚙️', 'Pengaturan', 'pengaturan')}
         </nav>
-        <div class="kaki">Masuk sebagai <b>${esc(S.user && S.user.nama)}</b><br><a href="#" id="btnKeluar" style="color:#ffd54a">Keluar</a></div>
+        <div class="kaki">Masuk sebagai <b>${esc(S.user && S.user.nama)}</b> <span style="opacity:.7">(${isKetua() ? 'Ketua' : 'Sekretaris'})</span><br><a href="#" id="btnKeluar" style="color:#ffd54a">Keluar</a></div>
       </aside>
       <div class="utama">
         <div class="atas"><button id="btnMenu">☰</button><img src="assets/logo.png" alt=""><b>${esc(CFG.NAMA || '')}</b></div>
@@ -230,11 +255,12 @@
       <div class="judul-hal"><div><h2>Selamat datang, ${esc(S.user.nama)}</h2><p>Portal layanan administrasi DPD PERSAGI Sulawesi Selatan</p></div></div>
       <div class="statistik">
         <div class="stat"><small>Nomor surat terakhir ${th}</small><b>${String(S.penomoran[th] || 0).padStart(3, '0')}</b></div>
-        <div class="stat"><small>Surat terbit ${th}</small><b id="stTerbit">…</b></div>
-        <div class="stat"><small>Draf surat</small><b id="stDraf">…</b></div>
+        <div class="stat"><small>Surat ditandatangani ${th}</small><b id="stTerbit">…</b></div>
+        <div class="stat"><small>${isKetua() ? 'Menunggu tanda tangan Anda' : 'Menunggu TTD Ketua'}</small><b id="stDraf">…</b></div>
         <div class="stat"><small>Pengurus aktif</small><b>${S.pengurus.filter(x => aktif(x.aktif)).length}</b></div>
         <a class="stat" href="#/pengurus?cek=1" style="text-decoration:none"><small>KTA perlu dicek</small><b style="color:${perluCek ? 'var(--oranye)' : 'var(--hijau)'}">${perluCek}</b></a>
       </div>
+      <div id="tugasSaya"></div>
       <div class="grid-ubin">
         <a class="ubin" href="#/surat"><div class="ik">✉️</div><b>Generate Surat</b><span>Undangan, permohonan, balasan, surat tugas — nomor otomatis</span></a>
         <a class="ubin" href="${sert ? esc(sert) : '#/pengaturan/integrasi'}"><div class="ik">🎓</div><b>${esc(S.p.namaAplikasiSertifikat || 'Kegiatan & Sertifikat')}</b><span>${sert ? 'Daftar hadir, materi, dan sertifikat kegiatan' : 'Belum dihubungkan — klik untuk mengatur tautan'}</span></a>
@@ -245,11 +271,42 @@
     try {
       const r = await api('surat.list', { tahun: th }, { diam: true });
       S.surat = r.data; S.penomoran = r.penomoran;
-      $('#stTerbit') && ($('#stTerbit').textContent = r.data.filter(x => x.status === 'terbit').length);
-      $('#stDraf') && ($('#stDraf').textContent = r.data.filter(x => x.status === 'draf').length);
+      hitungTugas();
+      $('#stTerbit') && ($('#stTerbit').textContent = r.data.filter(x => SUDAH_TTD.includes(x.status)).length);
+      $('#stDraf') && ($('#stDraf').textContent = r.data.filter(x => x.status === 'diajukan').length);
+      const kel = isKetua()
+        ? [['✍️ Menunggu tanda tangan Anda', r.data.filter(x => x.status === 'diajukan')]]
+        : [['↩️ Dikembalikan Ketua — perlu diperbaiki', r.data.filter(x => x.status === 'dikembalikan')], ['📤 Sudah ditandatangani — siap dikirim', r.data.filter(x => x.status === 'ditandatangani')]];
+      const isi = kel.filter(k => k[1].length).map(k => `<div class="kartu sorot"><h3>${k[0]} <span class="lencana biru">${k[1].length}</span></h3>${k[1].map(x => `<a class="baris-tugas" href="#/surat/${esc(x.id)}"><b>${esc(x.perihal) || '(tanpa perihal)'}</b><small>${esc(x.ringkas)}${x.status === 'dikembalikan' && x.catatan ? ' · Catatan: ' + esc(x.catatan) : ''}</small><span>Buka →</span></a>`).join('')}</div>`).join('');
+      $('#tugasSaya') && ($('#tugasSaya').innerHTML = isi ? isi + '<div style="height:14px"></div>' : '');
+      const nav = $('#samping nav a[href="#/surat"]'); if (nav && S.hitung && !nav.querySelector('.titik')) nav.insertAdjacentHTML('beforeend', ` <span class="titik">${S.hitung}</span>`);
       const t = [...r.data].sort((a, b) => String(b.diubah).localeCompare(String(a.diubah))).slice(0, 6);
       $('#terbaru') && ($('#terbaru').innerHTML = t.length ? tabelSurat(t, true) : '<div class="kosong">Belum ada surat. <a href="#/surat">Buat surat pertama</a></div>');
     } catch (e) { $('#terbaru') && ($('#terbaru').innerHTML = `<div class="kosong">${esc(e.message)}</div>`); }
+  }
+
+  function hitungTugas() {
+    const l = S.surat || [];
+    S.hitung = isKetua() ? l.filter(x => x.status === 'diajukan').length : l.filter(x => x.status === 'dikembalikan' || x.status === 'ditandatangani').length;
+  }
+
+  /* ================= VERIFIKASI PUBLIK (kode QR) ================= */
+  async function viewVerifikasi(kode) {
+    $('#app').innerHTML = `<div class="login-wrap"><div class="login-kartu" style="max-width:460px"><img src="assets/logo.png" alt=""><h1>Verifikasi Surat</h1><p class="sub">DPD PERSAGI Sulawesi Selatan</p><div class="pita"></div><div id="hasilV" style="text-align:left"><div class="kosong">Memeriksa…</div></div></div></div>`;
+    try {
+      const r = await fetch(CFG.API_URL, { method: 'POST', body: JSON.stringify({ action: 'verifikasi', kode }) }).then(x => x.json());
+      const el = $('#hasilV');
+      if (!r.ok || !r.ditemukan) { el.innerHTML = `<div class="peringatan-box" style="font-size:14px;text-align:center">❌ Surat dengan kode <b>${esc(kode)}</b> <b>tidak terdaftar</b> di DPD PERSAGI Sulawesi Selatan.</div>`; return; }
+      const batal = r.status === 'batal';
+      el.innerHTML = `<div style="text-align:center;margin-bottom:14px"><span class="lencana ${batal ? 'batal' : 'terbit'}" style="font-size:14px;padding:6px 14px">${batal ? '⚠ SURAT DIBATALKAN' : '✔ SURAT ASLI & TERDAFTAR'}</span></div>
+        <table class="tb"><tbody>
+          <tr><td style="color:var(--abu)">Nomor</td><td class="mono"><b>${esc(r.nomor)}</b></td></tr>
+          <tr><td style="color:var(--abu)">Tanggal</td><td>${fmtTgl(r.tanggal)}</td></tr>
+          <tr><td style="color:var(--abu)">Perihal</td><td>${esc(r.perihal)}</td></tr>
+          <tr><td style="color:var(--abu)">Ditandatangani</td><td>${esc(r.penandatangan)}<br><small style="color:var(--abu)">${esc(String(r.ttdPada).replace('T', ' '))}</small></td></tr>
+        </tbody></table>
+        <p class="petunjuk" style="margin:12px 0 0;text-align:center">Pastikan nomor dan perihal di atas sama dengan surat yang Anda terima.</p>`;
+    } catch (e) { $('#hasilV').innerHTML = `<div class="kosong">Tidak dapat memeriksa saat ini. ${esc(e.message)}</div>`; }
   }
 
   /* ================= DAFTAR SURAT ================= */
@@ -275,12 +332,12 @@
         <td style="white-space:nowrap">${fmtTgl(s.tanggal)}</td>
         <td>${(JENIS[s.jenis] || {}).ikon || ''} ${esc((JENIS[s.jenis] || {}).label || s.jenis)}</td>
         <td><a href="#/surat/${esc(s.id)}"><b>${esc(s.perihal) || '(tanpa perihal)'}</b></a><br><small style="color:var(--abu)">${esc(s.ringkas)}</small></td>
-        <td><span class="lencana ${esc(s.status)}">${esc(s.status)}</span></td>
+        <td>${lencanaStatus(s.status)}</td>
         ${ringkas ? '' : `<td><div class="deret" style="flex-wrap:nowrap">
           <a class="btn kecil" href="#/surat/${esc(s.id)}">Buka</a>
           <a class="btn kecil" href="#/surat/salin/${esc(s.id)}" title="Buat surat baru dari surat ini">Salin</a>
-          ${s.pdfUrl ? `<a class="btn kecil" href="${esc(s.pdfUrl)}" target="_blank" rel="noopener">PDF</a>` : ''}
-          ${s.status !== 'batal' ? `<button class="btn kecil merah" data-batal="${esc(s.id)}" data-st="${esc(s.status)}">${s.status === 'draf' ? 'Hapus' : 'Batalkan'}</button>` : ''}
+          ${!s.nomor && s.status !== 'diajukan' ? `<button class="btn kecil merah" data-batal="${esc(s.id)}" data-st="draf">Hapus</button>` : ''}
+          ${s.nomor && s.status !== 'batal' && isKetua() ? `<button class="btn kecil merah" data-batal="${esc(s.id)}" data-st="${esc(s.status)}">Batalkan</button>` : ''}
         </div></td>`}
       </tr>`).join('')}</tbody></table></div>`;
   }
@@ -289,7 +346,7 @@
     const th = S.tahunList;
     const daftarTahun = [...new Set([new Date().getFullYear(), ...Object.keys(S.penomoran).map(Number)])].sort((a, b) => b - a);
     kerangka('surat', `
-      <div class="judul-hal"><div><h2>Generate Surat</h2><p>Nomor terakhir ${th}: <b class="mono" id="noAkhir">${String(S.penomoran[th] || 0).padStart(3, '0')}</b> — nomor berikutnya diberikan otomatis saat surat diterbitkan.</p></div></div>
+      <div class="judul-hal"><div><h2>Generate Surat</h2><p>Nomor terakhir ${th}: <b class="mono" id="noAkhir">${String(S.penomoran[th] || 0).padStart(3, '0')}</b> — nomor diberikan otomatis saat Ketua menandatangani.</p></div></div>
       <div class="kartu"><h3>Buat surat baru</h3>
         <div class="grid-ubin">${Object.entries(JENIS).map(([k, j]) => `<a class="ubin" href="#/surat/baru/${k}" style="padding:14px"><div class="ik" style="width:40px;height:40px;font-size:19px;margin-bottom:8px">${j.ikon}</div><b>${j.label}</b><span>${j.ket}</span></a>`).join('')}</div>
       </div>
@@ -297,20 +354,20 @@
         <div class="saring">
           <select id="fTahun">${daftarTahun.map(t => `<option ${t === th ? 'selected' : ''}>${t}</option>`).join('')}</select>
           <select id="fJenis"><option value="">Semua jenis</option>${Object.entries(JENIS).map(([k, j]) => `<option value="${k}">${j.label}</option>`).join('')}</select>
-          <select id="fStatus"><option value="">Semua status</option><option value="terbit">Terbit</option><option value="draf">Draf</option><option value="batal">Batal</option></select>
+          <select id="fStatus"><option value="">Semua status</option><option value="draf">Draf</option><option value="diajukan">Menunggu TTD</option><option value="dikembalikan">Dikembalikan</option><option value="ditandatangani">Ditandatangani</option><option value="terkirim">Terkirim</option><option value="batal">Batal</option></select>
           <input type="text" id="fCari" placeholder="Cari nomor, perihal, tujuan, nama petugas…">
         </div>
         <div id="daftar"><div class="kosong">Memuat…</div></div>
       </div>`);
     const gambar = () => {
       const j = $('#fJenis').value, st = $('#fStatus').value, c = $('#fCari').value.toLowerCase();
-      const l = S.surat.filter(s => (!j || s.jenis === j) && (!st || s.status === st) && (!c || [s.nomor, s.perihal, s.ringkas].join(' ').toLowerCase().includes(c)))
+      const l = S.surat.filter(s => (!j || s.jenis === j) && (!st || s.status === st || (st === 'ditandatangani' && s.status === 'terbit')) && (!c || [s.nomor, s.perihal, s.ringkas].join(' ').toLowerCase().includes(c)))
         .sort((a, b) => (Number(b.noUrut) || 9999) - (Number(a.noUrut) || 9999) || String(b.diubah).localeCompare(String(a.diubah)));
       $('#daftar').innerHTML = l.length ? tabelSurat(l) : '<div class="kosong">Tidak ada surat.</div>';
       $$('[data-batal]').forEach(b => b.onclick = () => batalSurat(b.dataset.batal, b.dataset.st).then(ok => ok && muatList()));
     };
     const muatList = async () => {
-      try { const r = await api('surat.list', { tahun: S.tahunList }, { diam: true }); S.surat = r.data; S.penomoran = r.penomoran; $('#noAkhir') && ($('#noAkhir').textContent = String(S.penomoran[S.tahunList] || 0).padStart(3, '0')); if ($('#daftar')) gambar(); }
+      try { const r = await api('surat.list', { tahun: S.tahunList }, { diam: true }); S.surat = r.data; S.penomoran = r.penomoran; hitungTugas(); $('#noAkhir') && ($('#noAkhir').textContent = String(S.penomoran[S.tahunList] || 0).padStart(3, '0')); if ($('#daftar')) gambar(); }
       catch (e) { $('#daftar') && ($('#daftar').innerHTML = `<div class="kosong">${esc(e.message)}</div>`); }
     };
     $('#fTahun').onchange = e => { S.tahunList = +e.target.value; $('#daftar').innerHTML = '<div class="kosong">Memuat…</div>'; muatList(); };
@@ -330,7 +387,8 @@
 
   /* ================= MODEL SURAT ================= */
   function penandatanganAwal() {
-    const p = pengurusById(S.p.penandatanganId) || S.pengurus.find(x => x.jabatan === 'Ketua') || {};
+    const pidK = (akunKetua()[0] || {}).pengurusId;
+    const p = pengurusById(S.p.penandatanganId) || pengurusById(pidK) || S.pengurus.find(x => x.jabatan === 'Ketua') || {};
     return { pid: p.id || '', nama: p.nama || '', kta: p.kta || '', baris: S.p.ttdBaris || '', pakaiTtd: true, pakaiStempel: true };
   }
   function suratBaru(jenis) {
@@ -430,10 +488,13 @@
     const p = S.p;
     return `--f-isi:${fontStack(p.fontIsi || 'Cambria')};--s-isi:${+p.ukuranIsi || 12}pt;--f-tugas:${fontStack(p.fontTugas || 'Arial')};--s-tugas:${+p.ukuranTugas || 12}pt;--f-ttd:${fontStack(p.fontTtd || 'Arial')};--s-ttd:${+p.ukuranTtd || 12}pt;`;
   }
-  function htmlTtd(d) {
+  function htmlTtd(d, contoh) {
     const t = d.data.ttd || {}, p = S.p;
-    const gTtd = t.pakaiTtd && S.gambar['ttd_' + t.pid];
-    const gStp = t.pakaiStempel && S.gambar.stempel;
+    const tampil = contoh || sudahTtd(d);
+    const gTtd = tampil && t.pakaiTtd && S.gambar['ttd_' + t.pid];
+    const gStp = tampil && t.pakaiStempel && S.gambar.stempel;
+    const qr = !contoh && d.kode && p.pakaiQr !== 'tidak' ? qrDataUrl(alamatPortal() + '#/v/' + d.kode) : '';
+    const lebarQr = +p.qrLebar || 0.8;
     return `<div class="ttd">
       <div class="baris">${esc(p.kota || 'Makassar')}, ${fmtTgl(d.tanggal)}</div><div class="sp"></div>
       ${String(t.baris || '').split('\n').map(b => `<div class="baris">${esc(b) || '&nbsp;'}</div>`).join('')}
@@ -442,7 +503,12 @@
       <div class="kta">${esc(p.labelKta ?? 'KTA : ')}${esc(t.kta)}</div>
       ${gStp ? `<img class="stempel" src="${gStp}" alt="" style="left:${+p.stempelX || 0}in;bottom:${+p.stempelY || 0}in;width:${+p.stempelLebar || 1}in;opacity:${p.stempelOpasitas === '' ? 1 : +p.stempelOpasitas}">` : ''}
       ${gTtd ? `<img class="ttdimg" src="${gTtd}" alt="" style="left:${+p.ttdX || 0}in;bottom:${+p.ttdY || 0}in;width:${+p.ttdLebar || 1.8}in">` : ''}
+      ${qr ? `<div class="qr" style="left:-288pt;width:${lebarQr + 1.6}in"><img src="${qr}" alt="" style="width:${lebarQr}in;height:${lebarQr}in"><div><b>Dokumen sah</b><br>Pindai kode QR untuk memverifikasi keaslian surat ini.<br>Kode: ${esc(d.kode)}</div></div>` : ''}
+      ${!tampil && !contoh && d.status !== 'batal' ? '<div class="belum-ttd">Belum ditandatangani</div>' : ''}
     </div>`;
+  }
+  function qrDataUrl(teks) {
+    try { const q = window.qrcode(0, 'M'); q.addData(teks); q.make(); return q.createDataURL(8, 0); } catch (e) { return ''; }
   }
   const kopSrc = () => S.gambar.kop || 'assets/kop.png';
   const footerSrc = () => S.gambar.footer || 'assets/footer.png';
@@ -541,16 +607,36 @@
       return await wk.get('pdf');
     } finally { w.remove(); }
   }
-  async function unduhPdf(d, arsip) {
+  /** Draf: PDF dibuat di perangkat (tanpa TTD). Surat bertanda tangan: ambil PDF final dari arsip server. */
+  async function unduhPdf(d) {
+    if (sudahTtd(d)) return unduhFinal(d);
+    muat(true);
+    try { const pdf = await buatPdf(d); pdf.save('DRAF_' + namaFile(d).replace(/^DRAF_/, '')); toast('PDF draf diunduh (belum bernomor & belum ditandatangani).', 'sukses'); }
+    catch (e) { toast('Gagal membuat PDF: ' + e.message, 'galat'); }
+    finally { muat(false); }
+  }
+  async function unduhFinal(d) {
+    try {
+      const r = await api('surat.pdf', { id: d.id });
+      const bin = atob(r.base64), u8 = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+      const url = URL.createObjectURL(new Blob([u8], { type: 'application/pdf' }));
+      const a = document.createElement('a'); a.href = url; a.download = r.namaFile || namaFile(d); document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      toast('PDF final diunduh.', 'sukses');
+    } catch (e) {
+      if (isKetua() && /belum tersedia/.test(e.message)) { if (await konfirmasi('PDF final belum ada', 'Buat dan simpan PDF final sekarang?', 'Buat PDF')) { if (await arsipkanPdf(d)) return unduhFinal(d); } }
+      else toast(e.message, 'galat');
+    }
+  }
+  /** Dijalankan di perangkat Ketua setelah menandatangani: membuat PDF final lalu menyimpannya ke Drive. */
+  async function arsipkanPdf(d) {
     muat(true);
     try {
       const pdf = await buatPdf(d);
-      pdf.save(namaFile(d));
-      if (arsip && d.id && d.status === 'terbit') {
-        try { const r = await api('surat.simpanPdf', { id: d.id, base64: pdf.output('datauristring'), namaFile: namaFile(d) }, { diam: true }); d.pdfUrl = r.pdfUrl; toast('PDF diunduh dan diarsipkan ke Google Drive.', 'sukses'); }
-        catch (e) { toast('PDF diunduh, tetapi gagal diarsipkan: ' + e.message, 'galat'); }
-      } else toast('PDF diunduh.', 'sukses');
-    } catch (e) { toast('Gagal membuat PDF: ' + e.message, 'galat'); }
+      const r = await api('surat.simpanPdf', { id: d.id, base64: pdf.output('datauristring'), namaFile: namaFile(d) }, { diam: true });
+      d.pdfUrl = r.pdfUrl; return true;
+    } catch (e) { toast('PDF final gagal disimpan: ' + e.message + ' — buka surat ini lalu tekan "Simpan ulang PDF".', 'galat'); return false; }
     finally { muat(false); }
   }
   async function cetak(d) {
@@ -565,7 +651,7 @@
     try {
       if (id) {
         const r = await api('surat.get', { id });
-        D = { id: r.item.id, status: r.item.status, nomor: r.item.nomor, noUrut: r.item.noUrut, jenis: r.item.jenis, tanggal: String(r.item.tanggal).slice(0, 10), pdfUrl: r.item.pdfUrl, data: Object.assign(suratBaru(r.item.jenis).data, r.item.data || {}) };
+        D = dariServer(r.item);
       } else if (salinDari) {
         const r = await api('surat.get', { id: salinDari });
         D = suratBaru(r.item.jenis);
@@ -574,14 +660,18 @@
       } else D = suratBaru(jenis);
     } catch (e) { toast(e.message, 'galat'); location.hash = '#/surat'; return; }
     kotor = !!salinDari;
-    viewEditor();
+    bisaEdit(D) ? viewEditor() : viewTinjau();
+  }
+  function dariServer(it) {
+    return { id: it.id, status: it.status, nomor: it.nomor, noUrut: it.noUrut, jenis: it.jenis, tanggal: String(it.tanggal).slice(0, 10), pdfUrl: it.pdfUrl, kode: it.kode, catatan: it.catatan, ttdOleh: it.ttdOleh, ttdPada: it.ttdPada, kirim: it.kirim, riwayat: it.riwayat || [], data: Object.assign(suratBaru(it.jenis).data, it.data || {}) };
   }
 
   function viewEditor() {
     const d = D, dt = d.data, j = JENIS[d.jenis] || JENIS.umum, tugas = j.format === 'tugas';
     const th = (d.tanggal || hariIni()).slice(0, 4);
     const berikut = String((S.penomoran[th] || 0) + 1).padStart(+S.p.digitNomor || 3, '0');
-    const opsPengurus = S.pengurus.filter(x => aktif(x.aktif)).map(x => `<option value="${esc(x.id)}" ${dt.ttd.pid === x.id ? 'selected' : ''}>${esc(x.nama)} — ${esc(x.jabatan)}</option>`).join('');
+    const pidPenanda = akunKetua().map(a => a.pengurusId).filter(Boolean);
+    const opsPengurus = S.pengurus.filter(x => aktif(x.aktif) && (!pidPenanda.length || pidPenanda.includes(x.id) || x.id === dt.ttd.pid)).map(x => `<option value="${esc(x.id)}" ${dt.ttd.pid === x.id ? 'selected' : ''}>${esc(x.nama)} — ${esc(x.jabatan)}</option>`).join('');
     const f = dt.f || {};
     const inp = (k, label, tipe = 'text', ph = '', ket = '') => `<label class="f"><span>${label}${ket ? ' <i>' + ket + '</i>' : ''}</span><input type="${tipe}" data-f="${k}" value="${esc(f[k] ?? '')}" placeholder="${esc(ph)}"></label>`;
     const jadwalF = `<div class="dua">${inp('tgl1', 'Tanggal mulai', 'date')}${inp('tgl2', 'Tanggal selesai', 'date', '', '(opsional)')}</div><div class="dua">${inp('jam1', 'Jam mulai', 'time')}${inp('jam2', 'Jam selesai', 'time', '', '(kosong = Selesai)')}</div>${inp('tempat', 'Tempat', 'text', 'Zoom Meeting (Link Menyusul)')}`;
@@ -603,7 +693,9 @@
     </div>`;
 
     kerangka('surat', `
-      <div class="judul-hal"><div><h2>${j.ikon} ${esc(j.label)}</h2><p>${d.status === 'terbit' ? `Nomor <b class="mono">${esc(d.nomor)}</b> · <span class="lencana terbit">terbit</span>` : d.status === 'batal' ? `<span class="lencana batal">batal</span> ${esc(d.nomor)}` : `<span class="lencana draf">draf</span> · nomor diberikan saat diterbitkan (perkiraan <b class="mono">${berikut}</b>)`}${d.pdfUrl ? ` · <a href="${esc(d.pdfUrl)}" target="_blank" rel="noopener">Arsip PDF di Drive</a>` : ''}</p></div><a class="btn" href="#/surat">← Daftar surat</a></div>
+      <div class="judul-hal"><div><h2>${j.ikon} ${esc(j.label)}</h2><p>${lencanaStatus(d.status || 'draf')} · nomor diberikan saat Ketua menandatangani (perkiraan <b class="mono">${berikut}</b>)</p></div><a class="btn" href="#/surat">← Daftar surat</a></div>
+      ${d.status === 'dikembalikan' && d.catatan ? `<div class="peringatan-box" style="font-size:13.5px">↩️ <b>Dikembalikan Ketua.</b> Catatan: ${esc(d.catatan)}</div>` : ''}
+      ${d.modeEdit ? '<div class="info-box">Anda sedang mengedit surat yang diajukan sekretaris. Setelah selesai, tekan <b>Setujui & Tanda Tangani</b>.</div>' : ''}
       <datalist id="dlPengurus">${S.pengurus.filter(x => aktif(x.aktif)).map(x => `<option value="${esc(x.nama)}">`).join('')}</datalist>
       <div class="surat-layout">
         <div>
@@ -664,10 +756,9 @@
           </div>
 
           <div class="aksi-surat">
-            ${d.status !== 'batal' ? `<button class="btn" id="bSimpan">💾 Simpan${d.status === 'draf' ? ' draf' : ''}</button>` : ''}
-            ${d.status === 'draf' ? '<button class="btn kuning" id="bTerbit">✅ Terbitkan & beri nomor</button>' : ''}
-            <button class="btn utama-b" id="bPdf">⬇ Unduh PDF</button>
-            <button class="btn" id="bCetak" title="Cetak langsung / Simpan sebagai PDF kualitas vektor">🖨 Cetak</button>
+            <button class="btn" id="bSimpan">💾 ${d.modeEdit ? 'Simpan perubahan' : 'Simpan draf'}</button>
+            ${isKetua() ? '<button class="btn kuning" id="bTtd">✍️ ' + (d.modeEdit ? 'Setujui & Tanda Tangani' : 'Tanda tangani sekarang') + '</button>' : '<button class="btn kuning" id="bAjukan">📨 Ajukan ke Ketua</button>'}
+            ${d.modeEdit ? '<button class="btn" id="bBatalEdit">Selesai edit</button>' : '<button class="btn" id="bPdf" title="PDF draf, tanpa nomor dan TTD">⬇ PDF draf</button>'}
           </div>
         </div>
         <div class="panel-pratinjau">
@@ -721,17 +812,20 @@
     $('#ePakaiStp').onchange = e => { dt.ttd.pakaiStempel = e.target.checked; infoTtd(); ubah(); };
     function infoTtd() {
       const m = [];
-      if (dt.ttd.pakaiTtd && !S.gambar['ttd_' + dt.ttd.pid]) m.push('TTD untuk penandatangan ini belum diunggah.');
-      if (dt.ttd.pakaiStempel && !S.gambar.stempel) m.push('Stempel belum diunggah.');
+      if (isKetua() && dt.ttd.pid === S.user.pengurusId) {
+        if (dt.ttd.pakaiTtd && !S.gambar['ttd_' + dt.ttd.pid]) m.push('TTD Anda belum diunggah.');
+        if (dt.ttd.pakaiStempel && !S.gambar.stempel) m.push('Stempel belum diunggah.');
+      }
       if (!ktaSah(dt.ttd.kta)) m.push('KTA penandatangan perlu dicek (' + ketKta(dt.ttd.kta) + ').');
       $('#infoTtd').innerHTML = m.length ? `<div class="peringatan-box">${m.join('<br>')} <a href="#/pengaturan/ttd">Atur di Pengaturan</a></div>` : '';
     }
     infoTtd();
 
-    const bSimpan = $('#bSimpan'); if (bSimpan) bSimpan.onclick = () => simpanSurat(false);
-    const bTerbit = $('#bTerbit'); if (bTerbit) bTerbit.onclick = () => simpanSurat(true);
-    $('#bPdf').onclick = () => unduhPdf(d, true);
-    $('#bCetak').onclick = () => cetak(d);
+    $('#bSimpan').onclick = () => simpanSurat();
+    const bA = $('#bAjukan'); if (bA) bA.onclick = ajukanSurat;
+    const bT = $('#bTtd'); if (bT) bT.onclick = tandatanganiSurat;
+    const bP = $('#bPdf'); if (bP) bP.onclick = () => unduhPdf(d);
+    const bB = $('#bBatalEdit'); if (bB) bB.onclick = async () => { if (kotor && !(await konfirmasi('Selesai edit', 'Perubahan belum disimpan. Tinggalkan tanpa menyimpan?'))) return; kotor = false; bukaEditor({ id: d.id }); };
     window.addEventListener('resize', skalaPratinjau);
     renderPratinjau();
   }
@@ -830,37 +924,139 @@
     b.style.height = (n * (1248 + 18) * s + 10) + 'px';
   }
 
-  async function simpanSurat(terbitkan) {
-    const d = D, dt = d.data, tugas = d.jenis === 'tugas';
-    if (!tglSah(d.tanggal)) return toast('Tanggal surat belum diisi.', 'galat');
-    if (terbitkan) {
-      const kurang = [];
-      if (!tugas && !String(dt.perihal || '').trim()) kurang.push('Perihal');
-      if (!tugas && !baris(dt.tujuan).length) kurang.push('Tujuan surat');
-      if (tugas && !dt.petugas.length) kurang.push('Yang ditugaskan');
-      if (tugas && !baris(dt.untuk).length) kurang.push('Butir "Untuk"');
-      if (!dt.ttd.nama) kurang.push('Penandatangan');
-      if (kurang.length) return toast('Lengkapi dulu: ' + kurang.join(', '), 'galat');
-      const th = d.tanggal.slice(0, 4);
-      const t = d.tanggal.split('-');
-      const no = (S.p.formatNomor || '{NO}/DPD-PERSAGI-SULSEL/{BLN}/{THN}').replace('{NO}', String((S.penomoran[th] || 0) + 1).padStart(+S.p.digitNomor || 3, '0')).replace('{BLN}', ROMAWI[+t[1] - 1]).replace('{THN}', th);
-      const terpotong = $$('#pratinjau .pg.terpotong').length;
-      const ok = await konfirmasi('Terbitkan surat', `Surat akan diberi nomor <b class="mono">${esc(no)}</b> (perkiraan; nomor final dipastikan server agar tidak dobel).<br>Setelah terbit, nomor tidak bisa diubah atau dipakai ulang.${terpotong ? '<br><br><b style="color:var(--merah)">Perhatian:</b> ada isi yang melewati batas halaman.' : ''}`, 'Terbitkan');
-      if (!ok) return;
-    }
+  function paketSurat(d) {
+    const dt = d.data, tugas = d.jenis === 'tugas';
+    return { id: d.id, jenis: d.jenis, tanggal: d.tanggal, perihal: tugas ? 'Surat Tugas' : dt.perihal, ringkas: tugas ? dt.petugas.map(x => x.nama).join('; ') : baris(dt.tujuan).join('; '), data: dt };
+  }
+  function kekurangan(d) {
+    const dt = d.data, tugas = d.jenis === 'tugas', k = [];
+    if (!tglSah(d.tanggal)) k.push('Tanggal surat');
+    if (!tugas && !String(dt.perihal || '').trim()) k.push('Perihal');
+    if (!tugas && !baris(dt.tujuan).length) k.push('Tujuan surat');
+    if (tugas && !dt.petugas.length) k.push('Yang ditugaskan');
+    if (tugas && !baris(dt.untuk).length) k.push('Butir "Untuk"');
+    if (!dt.ttd.nama) k.push('Penandatangan');
+    return k;
+  }
+  const linkSurat = d => alamatPortal() + '#/surat/' + d.id;
+  function setelahServer(it, view) {
+    const mode = D && D.modeEdit;
+    D = dariServer(it); kotor = false;
+    if (location.hash !== '#/surat/' + D.id) { history.replaceState(null, '', '#/surat/' + D.id); hashSebelum = location.hash; }
+    if (view === 'edit') { D.modeEdit = mode; viewEditor(); } else if (view === 'tinjau') viewTinjau();
+  }
+  async function simpanSurat() {
+    if (!tglSah(D.tanggal)) return toast('Tanggal surat belum diisi.', 'galat');
+    try { const r = await api('surat.simpan', { item: paketSurat(D) }); setelahServer(r.item, 'edit'); toast('Tersimpan.', 'sukses'); }
+    catch (e) { toast(e.message, 'galat'); }
+  }
+  async function ajukanSurat() {
+    const k = kekurangan(D); if (k.length) return toast('Lengkapi dulu: ' + k.join(', '), 'galat');
+    if (!(await konfirmasi('Ajukan ke Ketua', 'Surat akan dikirim ke Ketua untuk diperiksa dan ditandatangani. Selama menunggu, surat tidak bisa diubah (kecuali ditarik kembali).', 'Ajukan'))) return;
     try {
-      const r = await api('surat.simpan', { item: { id: d.id, jenis: d.jenis, tanggal: d.tanggal, perihal: tugas ? 'Surat Tugas' : dt.perihal, ringkas: tugas ? dt.petugas.map(x => x.nama).join('; ') : baris(dt.tujuan).join('; '), data: dt, terbitkan } });
-      S.penomoran = r.penomoran;
-      const baru = !d.id;
-      Object.assign(d, { id: r.item.id, status: r.item.status, nomor: r.item.nomor, noUrut: r.item.noUrut });
-      kotor = false;
-      if (baru) { history.replaceState(null, '', '#/surat/' + d.id); hashSebelum = location.hash; }
-      if (terbitkan) {
-        viewEditor();
-        const u = await modal({ judul: 'Surat terbit', isi: `<p>Nomor surat: <b class="mono" style="font-size:15px">${esc(d.nomor)}</b></p><p>Unduh PDF sekarang? Salinan PDF juga otomatis disimpan ke arsip Google Drive.</p>`, tombol: [{ label: 'Nanti saja', nilai: false }, { label: '⬇ Unduh PDF', kelas: 'utama-b', nilai: true }] });
-        if (u) unduhPdf(d, true);
-      } else { toast('Tersimpan.', 'sukses'); }
+      const r = await api('surat.ajukan', { item: paketSurat(D) });
+      setelahServer(r.item, 'tinjau');
+      const k1 = akunKetua();
+      modalWa('Surat diajukan ✅', 'Surat sudah masuk ke daftar <b>Menunggu Tanda Tangan</b> Ketua. Kabari Ketua lewat WA:', k1,
+        `Yth. ${(k1[0] || {}).nama || 'Ketua DPD PERSAGI Sulsel'},\nAda surat yang menunggu tanda tangan:\n*${D.data.perihal || 'Surat Tugas'}*\n${paketSurat(D).ringkas}\n\nPeriksa & tanda tangani di sini:\n${linkSurat(D)}`);
     } catch (e) { toast(e.message, 'galat'); }
+  }
+  async function tandatanganiSurat() {
+    const k = kekurangan(D); if (k.length) return toast('Lengkapi dulu: ' + k.join(', '), 'galat');
+    const dt = D.data;
+    if (dt.ttd.pid !== S.user.pengurusId) return toast('Penandatangan surat ini bukan Anda (' + dt.ttd.nama + '). Ubah penandatangan, atau tautkan akun Anda di Pengaturan → Akun admin.', 'galat');
+    if (dt.ttd.pakaiTtd && !S.gambar['ttd_' + dt.ttd.pid] && !(await konfirmasi('TTD belum diunggah', 'Gambar TTD Anda belum ada, surat akan terbit tanpa gambar tanda tangan. Lanjutkan?'))) return;
+    const th = D.tanggal.slice(0, 4), t = D.tanggal.split('-');
+    const no = (S.p.formatNomor || '{NO}/DPD-PERSAGI-SULSEL/{BLN}/{THN}').replace('{NO}', String((S.penomoran[th] || 0) + 1).padStart(+S.p.digitNomor || 3, '0')).replace('{BLN}', ROMAWI[+t[1] - 1]).replace('{THN}', th);
+    if (!(await konfirmasi('Tanda tangani surat', `Dengan menekan <b>Tanda Tangani</b>, Anda menyetujui isi surat ini.<br><br>Nomor surat: <b class="mono">${esc(no)}</b> <small>(dipastikan server agar tidak dobel)</small><br>TTD ${dt.ttd.pakaiStempel ? 'dan stempel ' : ''}akan dibubuhkan, lalu PDF final disimpan ke arsip.`, '✍️ Tanda Tangani', 'kuning'))) return;
+    try {
+      const r = await api('surat.tandatangani', { item: paketSurat(D) });
+      S.penomoran = r.penomoran || S.penomoran;
+      D.modeEdit = false;
+      setelahServer(r.item, 'tinjau');
+      const ok = await arsipkanPdf(D);
+      viewTinjau();
+      const sek = akunSekretaris();
+      modalWa('Surat ditandatangani ✍️', `Nomor surat: <b class="mono">${esc(D.nomor)}</b>${ok ? '<br>PDF final sudah tersimpan di arsip.' : ''}<br><br>Kabari sekretaris agar surat segera dikirim:`, sek,
+        `Surat *${D.data.perihal || 'Surat Tugas'}* sudah ditandatangani.\nNomor: ${D.nomor}\n\nSilakan unduh PDF final lalu kirim ke yang bersangkutan:\n${linkSurat(D)}`);
+    } catch (e) { toast(e.message, 'galat'); }
+  }
+  async function kembalikanSurat() {
+    const c = await modal({ judul: 'Kembalikan ke sekretaris', isi: `<label class="f"><span>Catatan perbaikan</span><textarea id="kC" rows="4" placeholder="Mis. tanggal kegiatan salah, tambahkan nama petugas…"></textarea></label>`, tombol: [{ label: 'Batal' }, { label: '↩ Kembalikan', kelas: 'utama-b', aksi: l => { const v = $('#kC', l).value.trim(); if (!v) { toast('Tuliskan catatannya.', 'galat'); return false; } return v; } }] });
+    if (!c) return;
+    try {
+      const r = await api('surat.kembalikan', { id: D.id, catatan: c });
+      setelahServer(r.item, 'tinjau');
+      modalWa('Surat dikembalikan', 'Kabari sekretaris agar segera diperbaiki:', akunSekretaris(), `Surat *${D.data.perihal || 'Surat Tugas'}* dikembalikan untuk diperbaiki.\nCatatan: ${c}\n\n${linkSurat(D)}`);
+    } catch (e) { toast(e.message, 'galat'); }
+  }
+  async function tarikSurat() {
+    if (!(await konfirmasi('Tarik kembali', 'Surat ditarik dari Ketua dan kembali menjadi draf agar bisa diubah. Setelah diperbaiki, ajukan lagi.', 'Tarik kembali'))) return;
+    try { const r = await api('surat.tarik', { id: D.id }); setelahServer(r.item, 'edit'); } catch (e) { toast(e.message, 'galat'); }
+  }
+  async function tandaiTerkirim() {
+    const r0 = await modal({ judul: 'Tandai surat terkirim', isi: `<div class="dua"><label class="f"><span>Tanggal kirim</span><input type="date" id="tT" value="${hariIni()}"></label><label class="f"><span>Dikirim lewat</span><select id="tV"><option>WhatsApp</option><option>Email</option><option>Diantar langsung</option><option>Pos / ekspedisi</option><option>Lainnya</option></select></label></div><label class="f"><span>Keterangan <i>(opsional)</i></span><input type="text" id="tK" placeholder="Mis. dikirim ke WA sekretaris RSUD"></label>`, tombol: [{ label: 'Batal' }, { label: '📤 Simpan', kelas: 'utama-b', aksi: l => ({ tanggal: $('#tT', l).value, via: $('#tV', l).value, ket: $('#tK', l).value }) }] });
+    if (!r0) return;
+    try { const r = await api('surat.terkirim', Object.assign({ id: D.id }, r0)); setelahServer(r.item, 'tinjau'); toast('Surat ditandai terkirim.', 'sukses'); } catch (e) { toast(e.message, 'galat'); }
+  }
+
+  /* ---- Mode tinjau: untuk surat yang diajukan / sudah ditandatangani (ramah HP) ---- */
+  function viewTinjau() {
+    const d = D, j = JENIS[d.jenis] || JENIS.umum, ketua = isKetua(), st = d.status;
+    const kirim = d.kirim || null;
+    let aksi = '', info = '', lain = '';
+    if (st === 'diajukan') {
+      info = ketua ? 'Surat ini diajukan sekretaris dan menunggu tanda tangan Anda. Periksa isinya pada pratinjau.' : 'Menunggu pemeriksaan dan tanda tangan Ketua.';
+      aksi = ketua
+        ? `<button class="btn kuning besar" id="tTtd">✍️ Setujui & Tanda Tangani</button><button class="btn" id="tEdit">✏️ Edit dulu</button><button class="btn merah" id="tKembali">↩ Kembalikan</button>`
+        : `<button class="btn wa" id="tIngat">💬 Ingatkan Ketua via WA</button><button class="btn" id="tTarik">↶ Tarik kembali ke draf</button>`;
+    } else if (st === 'ditandatangani' || st === 'terbit') {
+      info = 'Surat sudah ditandatangani' + (d.ttdOleh ? ' oleh <b>' + esc(d.ttdOleh) + '</b>' : '') + (d.ttdPada ? ' pada ' + esc(String(d.ttdPada).replace('T', ' ').slice(0, 16)) : '') + '. Silakan unduh PDF final dan kirim ke tujuan.';
+      aksi = `<button class="btn utama-b besar" id="tUnduh">⬇ Unduh PDF final</button><button class="btn kuning" id="tKirim">📤 Tandai terkirim</button>` +
+        (ketua ? `<button class="btn wa" id="tKabari">💬 Kabari sekretaris</button>` : '');
+      lain = ketua ? `<button class="btn" id="tCetak">🖨 Cetak</button><button class="btn" id="tUlang">↻ Simpan ulang PDF</button><button class="btn merah" id="tBatal">Batalkan surat</button>` : '';
+    } else if (st === 'terkirim') {
+      info = 'Surat sudah dikirim' + (kirim ? ` lewat <b>${esc(kirim.via)}</b> pada ${fmtTgl(kirim.tanggal)}${kirim.ket ? ' — ' + esc(kirim.ket) : ''}` : '') + '.';
+      aksi = `<button class="btn utama-b besar" id="tUnduh">⬇ Unduh PDF final</button>`;
+      lain = ketua ? `<button class="btn" id="tCetak">🖨 Cetak</button><button class="btn merah" id="tBatal">Batalkan surat</button>` : '';
+    } else if (st === 'batal') {
+      info = 'Surat ini telah <b>dibatalkan</b>. Nomornya tetap tercatat dan tidak dipakai ulang.';
+    }
+    kerangka('surat', `
+      <div class="judul-hal"><div><h2>${j.ikon} ${esc(d.data.perihal && d.jenis !== 'tugas' ? d.data.perihal : j.label)}</h2><p>${lencanaStatus(st)} ${d.nomor ? '· <b class="mono">' + esc(d.nomor) + '</b>' : ''}</p></div><a class="btn" href="#/surat">← Daftar surat</a></div>
+      <div class="tinjau-layout">
+        <div class="panel-pratinjau"><div id="peringatan"></div><div class="pratinjau-bingkai" id="bingkai"><div class="pratinjau-skala" id="pratinjau"></div></div></div>
+        <div>
+          <div class="kartu"><h3>Status <button class="btn kecil hanya-hp" id="tLihat">📄 Lihat isi surat</button></h3><div style="line-height:1.6">${info}</div>
+            ${d.catatan && st !== 'ditandatangani' ? `<div class="peringatan-box" style="margin-top:10px">Catatan Ketua: ${esc(d.catatan)}</div>` : ''}
+            ${aksi ? `<div class="aksi-tinjau">${aksi}</div>` : ''}
+            ${lain ? `<div class="deret" style="margin-top:10px">${lain}</div>` : ''}
+          </div>
+          <div class="kartu"><h3>Ringkasan</h3><table class="tb"><tbody>
+            <tr><td style="color:var(--abu)">Jenis</td><td>${esc(j.label)}</td></tr>
+            <tr><td style="color:var(--abu)">Tanggal</td><td>${fmtTgl(d.tanggal)}</td></tr>
+            <tr><td style="color:var(--abu)">${d.jenis === 'tugas' ? 'Petugas' : 'Tujuan'}</td><td>${esc(paketSurat(d).ringkas)}</td></tr>
+            <tr><td style="color:var(--abu)">Penandatangan</td><td>${esc(d.data.ttd.nama)}</td></tr>
+          </tbody></table>
+          <div class="deret" style="margin-top:10px"><a class="btn kecil" href="#/surat/salin/${esc(d.id)}">⧉ Salin jadi surat baru</a></div></div>
+          ${(d.riwayat || []).length ? `<div class="kartu"><h3>Riwayat</h3><div class="riwayat">${d.riwayat.slice().reverse().map(x => `<div><b>${esc(x.aksi)}</b> — ${esc(x.oleh)}<br><small>${esc(String(x.waktu).replace('T', ' ').slice(0, 16))}${x.catatan ? ' · ' + esc(x.catatan) : ''}</small></div>`).join('')}</div></div>` : ''}
+        </div>
+      </div>`);
+    const on = (id, fn) => { const b = $('#' + id); if (b) b.onclick = fn; };
+    on('tLihat', () => $('#bingkai').scrollIntoView({ behavior: 'smooth' }));
+    on('tTtd', tandatanganiSurat);
+    on('tEdit', () => { D.modeEdit = true; viewEditor(); });
+    on('tKembali', kembalikanSurat);
+    on('tTarik', tarikSurat);
+    on('tIngat', () => { const k1 = akunKetua(); modalWa('Ingatkan Ketua', 'Kirim pengingat ke Ketua:', k1, `Yth. ${(k1[0] || {}).nama || 'Ketua'},\nMohon berkenan memeriksa & menandatangani surat:\n*${d.data.perihal || 'Surat Tugas'}*\n${linkSurat(d)}`); });
+    on('tUnduh', () => unduhFinal(d));
+    on('tKirim', tandaiTerkirim);
+    on('tKabari', () => modalWa('Kabari sekretaris', 'Kirim pemberitahuan ke sekretaris:', akunSekretaris(), `Surat *${d.data.perihal || 'Surat Tugas'}* sudah ditandatangani.\nNomor: ${d.nomor}\n\nSilakan unduh PDF final lalu kirim:\n${linkSurat(d)}`));
+    on('tCetak', () => cetak(d));
+    on('tUlang', async () => { if (await arsipkanPdf(d)) toast('PDF final disimpan ulang.', 'sukses'); });
+    on('tBatal', async () => { if (await batalSurat(d.id, st)) bukaEditor({ id: d.id }); });
+    window.addEventListener('resize', skalaPratinjau);
+    renderPratinjau();
   }
 
   /* ================= DATA PENGURUS ================= */
@@ -925,14 +1121,15 @@
   });
 
   /* ================= PENGATURAN ================= */
-  const TAB = [['ttd', 'TTD & Stempel'], ['kop', 'Kop & Footer'], ['nomor', 'Penomoran'], ['tampilan', 'Tampilan surat'], ['integrasi', 'Integrasi'], ['akun', 'Akun admin'], ['log', 'Log aktivitas']];
+  const TAB_SEMUA = [['ttd', 'TTD & Stempel'], ['kop', 'Kop & Footer'], ['nomor', 'Penomoran'], ['tampilan', 'Tampilan surat'], ['integrasi', 'Integrasi'], ['akun', 'Akun'], ['log', 'Log aktivitas']];
   function viewPengaturan(tab) {
     kerangka('pengaturan', `
       <div class="judul-hal"><div><h2>Pengaturan</h2><p>Berlaku untuk semua surat yang dibuat setelah disimpan.</p></div><button class="btn" id="bGantiPw">🔑 Ganti password saya</button></div>
-      <div class="tab">${TAB.map(([k, l]) => `<button class="${k === tab ? 'aktif' : ''}" data-tab="${k}">${l}</button>`).join('')}</div>
+      <div class="tab">${TAB_SEMUA.filter(t => isKetua() || !['ttd', 'akun'].includes(t[0])).map(([k, l]) => `<button class="${k === tab ? 'aktif' : ''}" data-tab="${k}">${l}</button>`).join('')}</div>
       <div id="isiTab"></div>`);
     $$('[data-tab]').forEach(b => b.onclick = () => { location.hash = '#/pengaturan/' + b.dataset.tab; });
     $('#bGantiPw').onclick = () => modalGantiPassword(false);
+    if (!isKetua() && ['ttd', 'akun'].includes(tab)) tab = 'kop';
     ({ ttd: tabTtd, kop: tabKop, nomor: tabNomor, tampilan: tabTampilan, integrasi: tabIntegrasi, akun: tabAkun, log: tabLog }[tab] || tabTtd)();
   }
   async function simpanPengaturan(data, pesan = 'Pengaturan tersimpan.') {
@@ -974,8 +1171,9 @@
 
   function tabTtd() {
     const p = S.p;
-    const ops = S.pengurus.filter(x => aktif(x.aktif));
-    const sel = ops.find(x => x.id === p.penandatanganId) || ops.find(x => x.jabatan === 'Ketua') || ops[0] || {};
+    if (!S.user.pengurusId) { $('#isiTab').innerHTML = '<div class="kartu"><div class="peringatan-box">Akun Anda belum ditautkan ke data pengurus. Buka tab <a href="#/pengaturan/akun">Akun</a>, edit akun Anda, lalu pilih nama Anda di "Tautkan ke pengurus".</div></div>'; return; }
+    const ops = S.pengurus.filter(x => aktif(x.aktif) && x.id === S.user.pengurusId);
+    const sel = ops[0] || {};
     const geser = (k, l, min, max, st) => `<div class="geser"><span>${l}</span><input type="range" data-g="${k}" min="${min}" max="${max}" step="${st}" value="${esc(p[k])}"><span class="mono" data-gv="${k}">${esc(p[k])}</span></div>`;
     $('#isiTab').innerHTML = `
       <div class="surat-layout" style="grid-template-columns:minmax(340px,560px) 1fr">
@@ -1016,7 +1214,7 @@
       const pp = pengurusById(pid) || {};
       const contoh = { tanggal: hariIni(), data: { ttd: { pid, nama: pp.nama, kta: pp.kta, baris: $('#sBaris').value, pakaiTtd: true, pakaiStempel: true } } };
       const s = Math.min(1, ($('#prTtd').clientWidth - 20) / 432);
-      $('#prTtd').innerHTML = `<div style="transform:scale(${s});transform-origin:0 0;width:432px;height:${290 * s}px"><div class="pg" style="${varGaya()}width:4.5in;height:3in;"><div class="hal" style="top:.15in;left:.1in;right:.1in;bottom:.1in"><div style="margin-left:1.2in">${htmlTtd(contoh).replace('class="ttd"', 'class="ttd" style="margin:0"')}</div></div></div></div>`;
+      $('#prTtd').innerHTML = `<div style="transform:scale(${s});transform-origin:0 0;width:432px;height:${290 * s}px"><div class="pg" style="${varGaya()}width:4.5in;height:3in;"><div class="hal" style="top:.15in;left:.1in;right:.1in;bottom:.1in"><div style="margin-left:1.2in">${htmlTtd(contoh, true).replace('class="ttd"', 'class="ttd" style="margin:0"')}</div></div></div></div>`;
     };
     $('#sTtdUntuk').onchange = prev; $('#sBaris').oninput = prev;
     $$('[data-g]').forEach(r => r.oninput = () => { S.p[r.dataset.g] = r.value; $(`[data-gv="${r.dataset.g}"]`).textContent = r.value; prev(); });
@@ -1061,7 +1259,7 @@
       </div>
       <div class="kartu"><h3>Nomor terakhir per tahun</h3>
         <div class="tabel-wrap"><table class="tb"><thead><tr><th>Tahun</th><th>Nomor terakhir</th><th>Nomor berikutnya</th><th></th></tr></thead><tbody>
-        ${ths.map(t => `<tr><td>${t}</td><td class="mono">${String(S.penomoran[t] || 0).padStart(+p.digitNomor || 3, '0')}</td><td class="mono">${String((S.penomoran[t] || 0) + 1).padStart(+p.digitNomor || 3, '0')}</td><td><button class="btn kecil" data-th="${t}">Ubah</button></td></tr>`).join('')}
+        ${ths.map(t => `<tr><td>${t}</td><td class="mono">${String(S.penomoran[t] || 0).padStart(+p.digitNomor || 3, '0')}</td><td class="mono">${String((S.penomoran[t] || 0) + 1).padStart(+p.digitNomor || 3, '0')}</td><td>${isKetua() ? `<button class="btn kecil" data-th="${t}">Ubah</button>` : ''}</td></tr>`).join('')}
         </tbody></table></div>
         <p class="petunjuk" style="margin:10px 0 0">Ubah hanya bila ada surat yang dinomori di luar portal (mis. surat manual). Nomor tidak boleh mundur di bawah nomor yang sudah terbit.</p>
       </div>`;
@@ -1091,13 +1289,14 @@
         <div class="tiga"><label class="f"><span>Zona waktu</span><select id="tZona">${['WITA', 'WIB', 'WIT'].map(z => `<option ${z === p.zonaWaktu ? 'selected' : ''}>${z}</option>`).join('')}</select></label>
         <label class="f"><span>Petugas per blok s.d.</span><input type="number" id="tBb" min="1" max="10" value="${esc(p.batasBlokPetugas)}"></label>
         <label class="f"><span>Petugas dalam tabel s.d.</span><input type="number" id="tBt" min="2" max="40" value="${esc(p.batasTabelPetugas)}"></label></div>
+        <div class="dua"><label class="f"><span>Kode QR verifikasi di surat</span><select id="tQr"><option value="ya" ${p.pakaiQr !== 'tidak' ? 'selected' : ''}>Ya, tampilkan</option><option value="tidak" ${p.pakaiQr === 'tidak' ? 'selected' : ''}>Tidak</option></select></label><label class="f"><span>Ukuran QR (inci)</span><input type="number" id="tQl" min="0.5" max="1.4" step="0.05" value="${esc(p.qrLebar || '0.8')}"></label></div>
         <p class="petunjuk">Surat tugas: sampai ${esc(p.batasBlokPetugas)} orang ditulis per blok (seperti contoh), sampai ${esc(p.batasTabelPetugas)} orang dalam tabel, lebih dari itu dipindah ke halaman lampiran.</p>
       </div>
       <button class="btn utama-b" id="bSimpanTampil">Simpan</button>`;
     $('#bSimpanTampil').onclick = () => {
       const bb = +$('#tBb').value, bt = +$('#tBt').value;
       if (bt < bb) return toast('Batas tabel harus ≥ batas blok.', 'galat');
-      simpanPengaturan({ fontIsi: $('#tFi').value, ukuranIsi: $('#tSi').value, fontTugas: $('#tFt').value, ukuranTugas: $('#tSt').value, fontTtd: $('#tFd').value, ukuranTtd: $('#tSd').value, zonaWaktu: $('#tZona').value, batasBlokPetugas: String(bb), batasTabelPetugas: String(bt) });
+      simpanPengaturan({ fontIsi: $('#tFi').value, ukuranIsi: $('#tSi').value, fontTugas: $('#tFt').value, ukuranTugas: $('#tSt').value, fontTtd: $('#tFd').value, ukuranTtd: $('#tSd').value, zonaWaktu: $('#tZona').value, batasBlokPetugas: String(bb), batasTabelPetugas: String(bt), pakaiQr: $('#tQr').value, qrLebar: $('#tQl').value });
     };
   }
 
@@ -1119,22 +1318,42 @@
     $('#isiTab').innerHTML = '<div class="kartu"><div class="kosong">Memuat…</div></div>';
     let data;
     try { data = (await api('admin.list', {}, { diam: true })).data; } catch (e) { $('#isiTab').innerHTML = `<div class="kartu kosong">${esc(e.message)}</div>`; return; }
+    const segarkan = d => { data = d; S.akun = d.filter(a => aktif(a.aktif)).map(a => ({ username: a.username, nama: a.nama, peran: a.peran, pengurusId: a.pengurusId, hp: a.hp })); const me = d.find(a => a.username === S.user.username); if (me) S.user.pengurusId = me.pengurusId; g(); };
+    const form = a => {
+      const x = a || { username: '', nama: '', peran: 'sekretaris', pengurusId: '', hp: '' };
+      return `${a ? '' : '<label class="f"><span>Username</span><input type="text" id="aU" placeholder="sekretaris"></label>'}
+        <label class="f"><span>Nama tampilan</span><input type="text" id="aN" value="${esc(x.nama)}"></label>
+        <div class="dua"><label class="f"><span>Peran</span><select id="aR" ${a && a.username === S.user.username ? 'disabled' : ''}><option value="sekretaris" ${x.peran !== 'ketua' ? 'selected' : ''}>Sekretaris (mengetik & mengirim)</option><option value="ketua" ${x.peran === 'ketua' ? 'selected' : ''}>Ketua (memeriksa & menandatangani)</option></select></label>
+        <label class="f"><span>No. WA <i>(untuk pemberitahuan)</i></span><input type="text" id="aH" value="${esc(x.hp)}" placeholder="0812xxxxxxx" inputmode="tel"></label></div>
+        <label class="f"><span>Tautkan ke pengurus <i>(wajib untuk Ketua: TTD & nama penandatangan)</i></span><select id="aPid"><option value="">— tidak ditautkan —</option>${S.pengurus.filter(p => aktif(p.aktif)).map(p => `<option value="${esc(p.id)}" ${p.id === x.pengurusId ? 'selected' : ''}>${esc(p.nama)} — ${esc(p.jabatan)}</option>`).join('')}</select></label>
+        ${a ? '' : '<label class="f"><span>Password awal <i>(min. 6 karakter)</i></span><input type="text" id="aP"></label>'}`;
+    };
+    const ambil = (l, a) => ({ username: a ? a.username : $('#aU', l).value, nama: $('#aN', l).value, peran: $('#aR', l).value, hp: $('#aH', l).value, pengurusId: $('#aPid', l).value, ...(a ? {} : { password: $('#aP', l).value }) });
     const g = () => {
-      $('#isiTab').innerHTML = `<div class="kartu"><h3>Akun admin <button class="btn kecil utama-b" id="bTambahA">+ Tambah admin</button></h3>
-        <div class="tabel-wrap"><table class="tb"><thead><tr><th>Username</th><th>Nama</th><th>Status</th><th></th></tr></thead><tbody>
-        ${data.map(a => `<tr class="${aktif(a.aktif) ? '' : 'nonaktif'}"><td class="mono">${esc(a.username)}${a.username === S.user.username ? ' <span class="lencana biru">anda</span>' : ''}</td><td>${esc(a.nama)}</td><td>${aktif(a.aktif) ? '<span class="lencana terbit">aktif</span>' : '<span class="lencana">nonaktif</span>'}${String(a.harusGanti).toUpperCase() === 'TRUE' ? ' <span class="lencana draf">wajib ganti password</span>' : ''}</td>
-        <td><div class="deret" style="flex-wrap:nowrap">${a.username === S.user.username ? '' : `<button class="btn kecil" data-reset="${esc(a.username)}">Reset password</button><button class="btn kecil" data-akt="${esc(a.username)}">${aktif(a.aktif) ? 'Nonaktifkan' : 'Aktifkan'}</button><button class="btn kecil merah" data-del="${esc(a.username)}">Hapus</button>`}</div></td></tr>`).join('')}
-        </tbody></table></div><p class="petunjuk" style="margin:10px 0 0">Semua admin punya hak yang sama. Admin baru wajib mengganti password saat login pertama.</p></div>`;
+      $('#isiTab').innerHTML = `<div class="kartu"><h3>Akun portal <button class="btn kecil utama-b" id="bTambahA">+ Tambah akun</button></h3>
+        <div class="tabel-wrap"><table class="tb"><thead><tr><th>Username</th><th>Nama</th><th>Peran</th><th>Pengurus tertaut</th><th>No. WA</th><th>Status</th><th></th></tr></thead><tbody>
+        ${data.map(a => `<tr class="${aktif(a.aktif) ? '' : 'nonaktif'}"><td class="mono">${esc(a.username)}${a.username === S.user.username ? ' <span class="lencana biru">anda</span>' : ''}</td><td>${esc(a.nama)}</td>
+        <td>${a.peran === 'ketua' ? '<span class="lencana terbit">Ketua</span>' : '<span class="lencana">Sekretaris</span>'}</td>
+        <td>${esc((pengurusById(a.pengurusId) || {}).nama || '—')}</td><td class="mono">${esc(a.hp || '—')}</td>
+        <td>${aktif(a.aktif) ? '<span class="lencana terbit">aktif</span>' : '<span class="lencana">nonaktif</span>'}${String(a.harusGanti).toUpperCase() === 'TRUE' ? ' <span class="lencana draf">wajib ganti password</span>' : ''}</td>
+        <td><div class="deret" style="flex-wrap:nowrap"><button class="btn kecil" data-edit="${esc(a.username)}">Edit</button>${a.username === S.user.username ? '' : `<button class="btn kecil" data-reset="${esc(a.username)}">Reset password</button><button class="btn kecil" data-akt="${esc(a.username)}">${aktif(a.aktif) ? 'Nonaktifkan' : 'Aktifkan'}</button><button class="btn kecil merah" data-del="${esc(a.username)}">Hapus</button>`}</div></td></tr>`).join('')}
+        </tbody></table></div>
+        <p class="petunjuk" style="margin:10px 0 0"><b>Sekretaris</b>: mengetik surat, mengajukan ke Ketua, mengunduh PDF final, menandai terkirim. <b>Ketua</b>: memeriksa, mengedit, mengembalikan, dan menandatangani; hanya Ketua yang bisa melihat & memakai gambar TTD dan stempel. Nomor WA dipakai untuk tombol pemberitahuan.</p></div>`;
       $('#bTambahA').onclick = async () => {
-        const r = await modal({ judul: 'Tambah admin', isi: `<label class="f"><span>Username</span><input type="text" id="aU" placeholder="sekretaris"></label><label class="f"><span>Nama</span><input type="text" id="aN"></label><label class="f"><span>Password awal <i>(min. 6 karakter)</i></span><input type="text" id="aP"></label>`, tombol: [{ label: 'Batal' }, { label: 'Simpan', kelas: 'utama-b', aksi: async l => { try { return (await api('admin.simpan', { item: { username: $('#aU', l).value, nama: $('#aN', l).value, password: $('#aP', l).value } })).data; } catch (e) { toast(e.message, 'galat'); return false; } } }] });
-        if (r) { data = r; g(); toast('Admin ditambahkan.', 'sukses'); }
+        const r = await modal({ judul: 'Tambah akun', isi: form(null), tombol: [{ label: 'Batal' }, { label: 'Simpan', kelas: 'utama-b', aksi: async l => { try { return (await api('admin.simpan', { item: ambil(l, null) })).data; } catch (e) { toast(e.message, 'galat'); return false; } } }] });
+        if (r) { segarkan(r); toast('Akun ditambahkan.', 'sukses'); }
       };
+      $$('[data-edit]').forEach(b => b.onclick = async () => {
+        const a = data.find(x => x.username === b.dataset.edit);
+        const r = await modal({ judul: 'Edit akun ' + a.username, isi: form(a), tombol: [{ label: 'Batal' }, { label: 'Simpan', kelas: 'utama-b', aksi: async l => { const it = ambil(l, a); it.aktif = aktif(a.aktif); if (a.username === S.user.username) delete it.peran; try { return (await api('admin.simpan', { item: it })).data; } catch (e) { toast(e.message, 'galat'); return false; } } }] });
+        if (r) { segarkan(r); toast('Akun diperbarui.', 'sukses'); }
+      });
       $$('[data-reset]').forEach(b => b.onclick = async () => {
         const r = await modal({ judul: 'Reset password ' + b.dataset.reset, isi: `<label class="f"><span>Password baru (sementara)</span><input type="text" id="aP"></label>`, tombol: [{ label: 'Batal' }, { label: 'Simpan', kelas: 'utama-b', aksi: async l => { const pw = $('#aP', l).value; if (pw.length < 6) { toast('Minimal 6 karakter.', 'galat'); return false; } try { return (await api('admin.simpan', { item: { username: b.dataset.reset, password: pw, aktif: true } })).data; } catch (e) { toast(e.message, 'galat'); return false; } } }] });
-        if (r) { data = r; g(); toast('Password direset.', 'sukses'); }
+        if (r) { segarkan(r); toast('Password direset.', 'sukses'); }
       });
-      $$('[data-akt]').forEach(b => b.onclick = async () => { const a = data.find(x => x.username === b.dataset.akt); try { data = (await api('admin.simpan', { item: { username: a.username, aktif: !aktif(a.aktif) } })).data; g(); } catch (e) { toast(e.message, 'galat'); } });
-      $$('[data-del]').forEach(b => b.onclick = async () => { if (!(await konfirmasi('Hapus admin', `Hapus akun <b>${esc(b.dataset.del)}</b>?`, 'Hapus', 'merah'))) return; try { data = (await api('admin.hapus', { username: b.dataset.del })).data; g(); } catch (e) { toast(e.message, 'galat'); } });
+      $$('[data-akt]').forEach(b => b.onclick = async () => { const a = data.find(x => x.username === b.dataset.akt); try { segarkan((await api('admin.simpan', { item: { username: a.username, aktif: !aktif(a.aktif) } })).data); } catch (e) { toast(e.message, 'galat'); } });
+      $$('[data-del]').forEach(b => b.onclick = async () => { if (!(await konfirmasi('Hapus akun', `Hapus akun <b>${esc(b.dataset.del)}</b>?`, 'Hapus', 'merah'))) return; try { segarkan((await api('admin.hapus', { username: b.dataset.del })).data); } catch (e) { toast(e.message, 'galat'); } });
     };
     g();
   }

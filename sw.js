@@ -1,6 +1,6 @@
 // Service worker: simpan aset statis agar aplikasi cepat dibuka. Data selalu diambil dari server.
-const CACHE = 'portal-persagi-v1';
-const ASET = ['./', 'index.html', 'style.css?v=1', 'surat.css?v=1', 'config.js?v=1', 'app.js?v=1',
+const CACHE = 'portal-persagi-v2';
+const ASET = ['./', 'index.html', 'style.css?v=2', 'surat.css?v=2', 'config.js?v=2', 'app.js?v=2', 'vendor/qrcode.js',
   'assets/kop.png', 'assets/footer.png', 'assets/logo.png', 'assets/icon-192.png',
   'assets/fonts/caladea-latin-400-normal.woff2', 'assets/fonts/caladea-latin-700-normal.woff2',
   'assets/fonts/arimo-latin-400-normal.woff2', 'assets/fonts/arimo-latin-700-normal.woff2'];

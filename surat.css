@@ -100,3 +100,9 @@
   .pg.terpotong .hal { outline: none; }
 }
 #cetak-area { display: none; }
+
+/* Kode QR verifikasi & tanda belum ditandatangani */
+.ttd .qr { position: absolute; bottom: 0; display: flex; gap: 7pt; align-items: flex-end; font-family: Arial, 'Arimo', sans-serif; font-size: 7.5pt; line-height: 1.25; color: #222; z-index: 2; }
+.ttd .qr img { display: block; image-rendering: pixelated; }
+.ttd .belum-ttd { position: absolute; left: 0; bottom: 2.6em; font-family: Arial, 'Arimo', sans-serif; font-size: 9pt; font-style: italic; color: #9ca3af; border: 1px dashed #cbd5e1; padding: 3pt 8pt; border-radius: 4pt; }
+@media print { .ttd .belum-ttd { color: #9ca3af; } }

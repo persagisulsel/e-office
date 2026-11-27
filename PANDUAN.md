@@ -26,7 +26,21 @@ Portal ini punya satu login (SSO) untuk admin. Isinya: **Generate Surat**, **Dat
 - **Pengaturan → Akun admin**: tambahkan admin lain, misalnya sekretaris.
 - **Pengaturan → Integrasi**: isi URL aplikasi Kegiatan & Sertifikat.
 
-## 4. Menghubungkan aplikasi lain ke SSO
+## 4. Alur surat (versi 1.1)
+1. **Sekretaris** mengetik surat, lalu menekan **Ajukan ke Ketua**. Setelah itu muncul tombol WA untuk mengabari Ketua.
+2. **Ketua** membuka link dari WA (bisa lewat HP) dan memeriksa pratinjau surat. Ada tiga pilihan:
+   - **Setujui & Tanda Tangani**: nomor diberikan otomatis, TTD + stempel + kode QR dibubuhkan, dan PDF final tersimpan di Drive.
+   - **Edit dulu**: Ketua memperbaiki sendiri, lalu menandatangani.
+   - **Kembalikan**: Ketua menulis catatan, lalu surat kembali ke sekretaris.
+3. **Sekretaris** mengunduh **PDF final**, mengirimkannya, lalu menekan **Tandai terkirim**.
+4. Penerima surat bisa memindai **kode QR** untuk memastikan keaslian surat. Halaman verifikasi bisa dibuka tanpa login.
+
+Pengaturan akun ada di **Pengaturan → Akun**:
+- Akun Ketua harus *ditautkan ke pengurus* (nama Ketua).
+- Isi **No. WA** setiap akun.
+- Gambar TTD dan stempel hanya terlihat dan terpakai di akun Ketua.
+
+## 5. Menghubungkan aplikasi lain ke SSO
 Aplikasi lain harus berada di domain yang sama (`persagisulsel.github.io/...`). Tempel kode ini di bagian paling awal aplikasi:
 
 ```js
@@ -42,6 +56,11 @@ fetch(PORTAL_API, { method: 'POST', body: JSON.stringify({ action: 'whoami', tok
 ```
 
 Kalau backend aplikasi lain (Apps Script) juga perlu memeriksa token, panggil `UrlFetchApp.fetch(PORTAL_API, {method:'post', payload: JSON.stringify({action:'whoami', token})})`.
+
+## Memperbarui Code.gs (tanpa mengganti URL)
+Tempel `Code.gs` yang baru, lalu klik **Terapkan → Kelola deployment → Edit (pensil) → Versi: Versi baru → Terapkan**. Data lama otomatis disesuaikan dengan versi baru:
+- akun `admin` menjadi Ketua;
+- surat berstatus "terbit" menjadi "ditandatangani".
 
 ## Catatan teknis
 - Ukuran kertas F4 (8,5 × 13 inci). Tata letak meniru surat 031 dan 035: isi surat Cambria 12, surat tugas dan blok tanda tangan Arial 12.
